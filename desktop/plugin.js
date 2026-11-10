@@ -39,8 +39,8 @@ const CSS = `
 .sab .small{font-size:12px}
 /* the week */
 .sab .week{position:relative;margin-top:16px;height:74px;border-radius:8px;overflow:hidden;background:color-mix(in srgb,var(--ui-text-primary) 3.5%,transparent)}
-.sab .days{position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,1fr)}
-.sab .days>div{border-left:1px solid var(--ui-stroke-tertiary);padding:8px 10px;font-size:11px;color:var(--ui-text-tertiary);letter-spacing:.04em;text-transform:uppercase}
+.sab .days{position:absolute;inset:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.sab .days>div{border-left:1px solid var(--ui-stroke-tertiary);padding:8px clamp(4px,1.2cqi,10px);overflow:hidden;font-size:11px;color:var(--ui-text-tertiary);letter-spacing:.04em;text-transform:uppercase}
 .sab .days>div:first-child{border-left:none}
 .sab .band{position:absolute;top:0;bottom:0;background:linear-gradient(180deg,color-mix(in srgb,var(--ui-accent) 34%,transparent),color-mix(in srgb,var(--ui-accent) 14%,transparent));border-left:2px solid var(--ui-accent);border-right:2px solid color-mix(in srgb,var(--ui-accent) 50%,transparent)}
 .sab .band[data-on=true]{animation:sab-breathe 4s ease-in-out infinite}
@@ -54,7 +54,8 @@ const CSS = `
 @keyframes sab-flicker{30%{transform:scaleY(1.04) rotate(-1deg)}60%{transform:scaleY(.97) rotate(1deg)}}
 /* the steps */
 .sab .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:18px}
-@container (max-width:680px){.sab .flow{grid-template-columns:1fr 1fr}}
+@container (max-width:680px){.sab .flow{grid-template-columns:1fr 1fr}.sab .head .mark{width:32px;height:32px}}
+@container (max-width:420px){.sab .flow{grid-template-columns:1fr}.sab .days>div{font-size:9.5px;letter-spacing:0}}
 .sab .fl{padding-left:12px;border-left:2px solid var(--ui-stroke-secondary);transition:border-color .4s}
 .sab .fl[data-on=true]{border-left-color:var(--ui-accent)}
 .sab .fl h4{margin:0 0 2px;font-size:12.5px;font-weight:600;display:flex;gap:6px;align-items:center}
