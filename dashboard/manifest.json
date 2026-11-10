@@ -1,0 +1,7 @@
+{
+  "name": "sabbath",
+  "label": "Sabbath",
+  "description": "Backend for the Sabbath Desktop page",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}

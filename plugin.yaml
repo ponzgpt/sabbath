@@ -1,0 +1,39 @@
+name: sabbath
+version: "0.1.0"
+description: >-
+  Your agent never rests. Now it rests with you. Once a week Hermes keeps a day of rest: it says goodnight
+  on your phone, pauses its own scheduled jobs, keeps you company in anything but work, sets aside what can
+  wait, and when the rest ends sends one gentle digest while the jobs catch up. /sabbath ox when something
+  truly can't wait.
+author: Javier Ponz (ponzgpt)
+license: MIT
+homepage: https://github.com/ponzgpt/sabbath
+tags: [wellbeing, rest, focus, cron, desktop, gateway]
+manifest_version: 2
+requires_hermes: ">=0.23.0"
+provides_tools: [sabbath_set_aside, sabbath_status]
+provides_hooks: [pre_llm_call, pre_gateway_dispatch]
+config_schema:
+  owner_name:
+    type: str
+    label: Your name
+    description: How Hermes greets you when the rest begins and ends. Where it writes is set by sending /sabbath here from your phone.
+  begins:
+    type: str
+    default: "sat 18:00"
+    label: When your rest begins
+    description: A day and a time, e.g. "sat 18:00" (sunset to sunset) or "sun 00:00".
+  hours:
+    type: int
+    default: 24
+    label: How long it lasts (hours)
+  timezone:
+    type: str
+    default: ""
+    label: Time zone
+    description: An IANA name such as Europe/Madrid. Empty uses the time zone of the machine running Hermes.
+  keep_running:
+    type: str
+    default: ""
+    label: Jobs that never rest
+    description: Comma-separated cron job names or ids that keep running (backups, monitors).
