@@ -174,7 +174,13 @@ def notify_desktop() -> None:
 
 # --- the verbs, shared by the chat command and the Desktop page -----------------------
 
-def begin_now(seconds: float, kind: str = "now") -> str:
+def _split_here(actions: list, here: str) -> tuple[list, str]:
+    """A message meant for the chat the command came from becomes the command's reply (no duplicate)."""
+    mine = [a for a in actions if a["type"] == "send" and here and a["target"] == here]
+    return [a for a in actions if a not in mine], "\n".join(a["text"] for a in mine)
+
+
+def begin_now(seconds: float, kind: str = "now", here: str = "") -> str:
     now = time.time()
     with locked_state() as s:
         if s["rest"]:
@@ -182,16 +188,21 @@ def begin_now(seconds: float, kind: str = "now") -> str:
         actions = core.begin(s, now, now + seconds, runnable_jobs(), kind=kind)
         ends = core.when(s, s["rest"]["ends_at"], now)
         n = len(s["rest"]["held"])
+    actions, reply = _split_here(actions, here)
     perform(actions)
+    hint = "/sabbath ox if something truly can't wait; /sabbath end to stop early."
+    if reply:
+        return f"{reply}\n\n{hint}"
     return (f"🕯 Resting until {ends}. {core.plural(n, 'scheduled job')} {'is' if n == 1 else 'are'} resting too. "
-            "Talk to me about anything but work; /sabbath ox if something truly can't wait.")
+            f"Talk to me about anything but work; {hint}")
 
 
-def end_now() -> str:
+def end_now(here: str = "") -> str:
     with locked_state() as s:
         actions = core.end(s, time.time(), early=True)
+    actions, reply = _split_here(actions, here)
     perform(actions)
-    return "☀ Your rest is over. Welcome back." if actions else "You weren't resting."
+    return reply or ("☀ Your rest is over. Welcome back." if actions else "You weren't resting.")
 
 
 def doctor(state: dict) -> list:

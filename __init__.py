@@ -87,6 +87,19 @@ def _ticker(stop: threading.Event) -> None:
 USAGE = "/sabbath [status | here | now [hours] | try | end | ox [why] | keep | stop | doctor]"
 
 
+def _session_chat() -> str:
+    """platform:chat of the messaging conversation running this command ('' elsewhere)."""
+    try:
+        from gateway.session_context import get_session_env
+        platform = get_session_env("HERMES_SESSION_PLATFORM", "").strip().lower()
+        chat = get_session_env("HERMES_SESSION_CHAT_ID", "").strip()
+        if platform and chat and platform not in ("cli", "tui", "desktop", "local", "api_server"):
+            return f"{platform}:{chat}"
+    except Exception:
+        pass
+    return ""
+
+
 def _current_chat() -> str:
     try:
         from gateway.session_context import get_session_env
@@ -147,11 +160,11 @@ def run(raw: str) -> str:
             return "Usage: /sabbath now [hours]"
         with store.locked_state() as s:
             hours = hours or s["hours"]
-        return store.begin_now(max(0.1, min(72.0, hours)) * 3600)
+        return store.begin_now(max(0.1, min(72.0, hours)) * 3600, here=_session_chat())
     if verb == "try":
-        return store.begin_now(core.TRY_SECONDS, kind="try")
+        return store.begin_now(core.TRY_SECONDS, kind="try", here=_session_chat())
     if verb == "end":
-        return store.end_now()
+        return store.end_now(here=_session_chat())
     if verb == "ox":
         with store.locked_state() as s:
             out = core.ox(s, time.time(), rest)
