@@ -64,6 +64,7 @@ From any chat: `/sabbath status | here | now [hours] | try | end | ox [why] | ke
 - **Sends messages on your behalf** to the chat you set with `/sabbath here`: one when the rest begins and one digest when it ends.
 - **Adds context to each turn while you rest** (via `pre_llm_call`), asking Hermes not to do work that can wait.
 - **Imports `cron.jobs`** (what `hermes cron pause/resume` use) and **`tools.send_message_tool`** (what `hermes send` uses), because Hermes has no public plugin API for either yet (`hermes plugins validate` lists them under catalog rule 9).
+- **Runs a background thread** (one per Hermes process; a file lock lets only one act) that wakes every 20 s to begin and end the rest on time. No network calls of its own beyond the two messages above, no shell commands, no telemetry.
 - Stores its state (your rhythm, the basket, the history) in plain text in `$HERMES_HOME/plugin-data/sabbath/`.
 
 ## Develop
