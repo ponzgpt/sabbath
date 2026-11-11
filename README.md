@@ -51,9 +51,8 @@ From any chat: `/sabbath status | here | now [hours] | try | end | ox [why] | ke
 |---|---|
 | `pre_llm_call` hook | While you rest, every turn on every surface (Telegram, Desktop, CLI…) knows it, so Hermes keeps you company in anything but work |
 | Tools `sabbath_set_aside`, `sabbath_status` | Hermes puts what can wait into the basket, only when you agree |
-| Hermes's cron jobs | Paused at the start of the rest (with the reason "Sabbath"), resumed at the end; Hermes's own catch-up policy runs what was missed |
+| Hermes's cron jobs, through the `cronjob_manage` tool (`ctx.dispatch_tool`) | Paused at the start of the rest (with the reason "Sabbath"), resumed at the end; Hermes's own catch-up policy runs what was missed |
 | `/sabbath` command | Everything from any chat surface |
-| `pre_gateway_dispatch` hook | Remembers which chat sent `/sabbath here` (observes only; never consumes a message) |
 | Background ticker (one process at a time, file lock) | Begins and ends the rest on time |
 | Desktop page (`desktop/plugin.js` + `dashboard/plugin_api.py`) | Your week at a glance, the rest in progress, what sleeps, what's set aside, the weeks you've kept; built from the Desktop UI kit and theme tokens |
 | `config_schema` | The settings form in Desktop |
@@ -63,8 +62,9 @@ From any chat: `/sabbath status | here | now [hours] | try | end | ox [why] | ke
 - **Pauses and resumes your Hermes cron jobs.** At the start of each rest it pauses every runnable job except the ones you list in *Jobs that never rest*; at the end it resumes only the jobs it paused that are still paused with its reason (a job you paused yourself stays paused).
 - **Sends messages on your behalf** to the chat you set with `/sabbath here`: one when the rest begins and one digest when it ends.
 - **Adds context to each turn while you rest** (via `pre_llm_call`), asking Hermes not to do work that can wait.
-- **Imports `cron.jobs`** (what `hermes cron pause/resume` use) and **`tools.send_message_tool`** (what `hermes send` uses), because Hermes has no public plugin API for either yet (`hermes plugins validate` lists them under catalog rule 9).
-- **Runs a background thread** (one per Hermes process; a file lock lets only one act) that wakes every 20 s to begin and end the rest on time. No network calls of its own beyond the two messages above, no shell commands, no telemetry.
+- **Manages jobs through Hermes's own `cronjob_manage` tool** (list, pause with the reason "Sabbath", resume), dispatched from the agent half. Pauses and resumes asked for on the Desktop page are carried out by that half within 20 s.
+- **Runs `hermes send`** (Hermes's own CLI, as an argv list with the text over stdin) to deliver each message, because Hermes has no public in-process API for a plugin to start a message to a chat yet. That's one short process per message.
+- **Runs a background thread** (one per Hermes process; a file lock lets only one act) that wakes every 20 s to begin and end the rest on time. No network calls of its own beyond the two messages above, no shell commands other than `hermes send`, no telemetry.
 - Stores its state (your rhythm, the basket, the history) in plain text in `$HERMES_HOME/plugin-data/sabbath/`.
 
 ## Develop

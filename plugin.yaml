@@ -1,5 +1,5 @@
 name: sabbath
-version: "0.1.0"
+version: "0.2.0"
 description: >-
   Your agent never rests. Now it rests with you. Once a week Hermes keeps a day of rest: it says goodnight
   on your phone, pauses its own scheduled jobs, keeps you company in anything but work, sets aside what can
@@ -12,7 +12,7 @@ tags: [wellbeing, rest, focus, cron, desktop, gateway]
 manifest_version: 2
 requires_hermes: ">=0.23.0"
 provides_tools: [sabbath_set_aside, sabbath_status]
-provides_hooks: [pre_llm_call, pre_gateway_dispatch]
+provides_hooks: [pre_llm_call]
 config_schema:
   owner_name:
     type: str

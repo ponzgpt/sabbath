@@ -19,14 +19,13 @@ def _view() -> dict:
     with store.locked_state() as s:
         v = core.public_view(s)
         v["doctor"] = store.doctor(s)
+        v["jobs"] = store.runnable_jobs(s) if not v["rest"] else []
         return v
 
 
 @router.get("/state")
 async def state():
-    v = _view()
-    v["jobs"] = store.runnable_jobs() if not v["rest"] else []
-    return v
+    return _view()
 
 
 @router.post("/keep")

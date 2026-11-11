@@ -85,31 +85,49 @@ def apply_settings(state: dict, settings: dict) -> None:
     state["keep_running"] = [k.strip() for k in str(settings.get("keep_running") or "").split(",") if k.strip()]
 
 
-# --- Hermes's own scheduled jobs ------------------------------------------------
-# ponytail: cron.jobs is not on Hermes' public-import list; it is what `hermes cron pause/resume` use.
-# Swap for a public scheduler API when one ships.
+# --- Hermes's own scheduled jobs, through the public cronjob_manage tool -----------
+# Only the agent half has a plugin context to dispatch it. The Desktop backend reads the job list the
+# agent's ticker keeps in the state, and queues its pauses and resumes for that ticker (<= 20 s).
 
-def runnable_jobs() -> list:
+_ctx = None
+
+
+def use(ctx) -> None:
+    global _ctx
+    _ctx = ctx
+
+
+def _cron(args: dict) -> dict:
+    if _ctx is None:
+        raise RuntimeError("no Hermes plugin context in this process")
+    out = json.loads(_ctx.dispatch_tool("cronjob_manage", args) or "{}")
+    if out.get("error") or out.get("success") is False:
+        raise RuntimeError(out.get("error") or f"cronjob_manage {args.get('action')} failed")
+    return out
+
+
+def runnable_jobs(state: dict) -> list:
+    """Hermes's runnable cron jobs ({id, name, schedule}); outside the agent, the last list it saw."""
+    if _ctx is None:
+        return list(state.get("jobs_seen") or [])
     try:
-        from cron.jobs import is_job_runnable, list_jobs
-        return [{"id": j["id"], "name": j.get("name") or j["id"], "schedule": j.get("schedule_display", "")}
-                for j in list_jobs(include_disabled=False) if is_job_runnable(j)]
+        jobs = _cron({"action": "list", "include_disabled": False})["jobs"]
     except Exception as exc:  # no cron here: nothing to hold
         log.info("sabbath: cron jobs unavailable (%s)", exc)
         return []
+    state["jobs_seen"] = [{"id": j["job_id"], "name": j.get("name") or j["job_id"], "schedule": j.get("schedule") or ""}
+                          for j in jobs if j.get("enabled", True) and j.get("state") != "paused"]
+    return list(state["jobs_seen"])
 
 
 def pause_jobs(jobs: list, until: float) -> list:
     """Pause each job; returns the ones actually paused."""
     paused = []
-    try:
-        from cron.jobs import pause_job
-    except Exception:
-        return paused
+    reason = f"{PAUSE_REASON}: resting until {time.strftime('%a %H:%M', time.localtime(until))}"
     for j in jobs:
         try:
-            if pause_job(j["id"], reason=f"{PAUSE_REASON}: resting until {time.strftime('%a %H:%M', time.localtime(until))}"):
-                paused.append(j)
+            _cron({"action": "pause", "job_id": j["id"], "reason": reason})
+            paused.append(j)
         except Exception as exc:  # noqa: BLE001
             log.warning("sabbath: could not pause %s: %s", j["id"], exc)
     return paused
@@ -118,14 +136,16 @@ def pause_jobs(jobs: list, until: float) -> list:
 def resume_jobs(jobs: list) -> None:
     """Wake only the jobs Sabbath paused and nobody touched since (a job you paused yourself stays paused)."""
     try:
-        from cron.jobs import get_job, resume_job
-    except Exception:
+        listed = {j["job_id"]: j for j in _cron({"action": "list", "include_disabled": True})["jobs"]}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("sabbath: could not list jobs to resume: %s", exc)
         return
     for j in jobs:
+        job = listed.get(j["id"])
+        if not job or not str(job.get("paused_reason") or "").startswith(PAUSE_REASON):
+            continue
         try:
-            job = get_job(j["id"])
-            if job and str(job.get("paused_reason") or "").startswith(PAUSE_REASON):
-                resume_job(j["id"])
+            _cron({"action": "resume", "job_id": j["id"]})
         except Exception as exc:  # noqa: BLE001
             log.warning("sabbath: could not resume %s: %s", j["id"], exc)
 
@@ -134,15 +154,35 @@ def resume_jobs(jobs: list) -> None:
 
 def send_to(target: str, text: str) -> None:
     """One message to ``platform:ref`` through Hermes' own delivery."""
-    # ponytail: tools.send_message_tool is not on Hermes' public-import list yet; it is what
-    # `hermes send` uses. Swap for a public send API when one ships.
-    from tools.send_message_tool import send_message_tool
-    result = json.loads(send_message_tool({"action": "send", "target": target, "message": text}) or "{}")
-    if result.get("error") or result.get("success") is False:
+    # Public route only: the `hermes send` CLI (same delivery as the gateway, no agent loop), as an argv
+    # list with no shell; the text goes over stdin.
+    # ponytail: one process per message; swap for a public in-process send API when Hermes ships one.
+    import importlib.util
+    import shutil
+    import subprocess
+    import sys
+    exe = shutil.which("hermes")
+    if exe:
+        cli = [exe]
+    elif importlib.util.find_spec("hermes_cli"):  # inside Hermes but its launcher isn't on PATH: same entry point
+        cli = [sys.executable, "-c", "import sys; from hermes_cli.main import main; sys.argv[0] = 'hermes'; sys.exit(main())"]
+    else:
+        raise RuntimeError("the hermes CLI is not on PATH")
+    run = subprocess.run([*cli, "send", "--to", target, "--json"], input=text, capture_output=True, text=True, timeout=120)
+    try:
+        result = json.loads(run.stdout or "{}")
+    except json.JSONDecodeError:
+        result = {"error": (run.stderr or run.stdout or "send failed").strip()[:200]}
+    if run.returncode != 0 or result.get("error") or result.get("success") is False:
         raise RuntimeError(result.get("error") or "send failed")
 
 
 def perform(actions: list) -> None:
+    cron = [a for a in actions if a["type"] in ("pause", "resume")]
+    if cron and _ctx is None:  # Desktop backend: the agent's ticker carries these out
+        with locked_state() as s:
+            s["cron_queue"] = (s.get("cron_queue") or []) + cron
+        actions = [a for a in actions if a not in cron]
     for a in actions:
         try:
             if a["type"] == "send":
@@ -185,7 +225,7 @@ def begin_now(seconds: float, kind: str = "now", here: str = "") -> str:
     with locked_state() as s:
         if s["rest"]:
             return f"You're already resting, until {core.when(s, s['rest']['ends_at'], now)}."
-        actions = core.begin(s, now, now + seconds, runnable_jobs(), kind=kind)
+        actions = core.begin(s, now, now + seconds, runnable_jobs(s), kind=kind)
         ends = core.when(s, s["rest"]["ends_at"], now)
         n = len(s["rest"]["held"])
     actions, reply = _split_here(actions, here)

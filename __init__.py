@@ -18,7 +18,6 @@ from . import sabbath_store as store
 
 log = logging.getLogger("sabbath")
 TICK_SECONDS = 20
-HERE_WINDOW = 120  # seconds a "/sabbath here" seen at the gateway stays claimable
 _ctx = None
 
 
@@ -46,19 +45,6 @@ def _on_llm_call(platform=None, **_kw):
         return None
 
 
-async def _on_gateway_message(event=None, **_kw):
-    """Remember the chat a '/sabbath here' came from (the command itself may run in the plugin host)."""
-    try:
-        if (event.text or "").strip().lower().startswith("/sabbath here"):
-            src = event.source
-            platform = getattr(src.platform, "value", src.platform)
-            with store.locked_state() as s:
-                s["here_pending"] = {"chat": f"{platform}:{src.chat_id}", "at": time.time()}
-    except Exception as exc:
-        log.debug("sabbath here capture failed: %s", exc)
-    return None
-
-
 # --- background: begin and end on time (one process at a time) ----------------------
 
 def _ticker(stop: threading.Event) -> None:
@@ -75,8 +61,11 @@ def _ticker(stop: threading.Event) -> None:
                     continue
             with store.locked_state() as s:
                 _sync(s)
-                actions = core.tick(s, time.time(), store.runnable_jobs)
-            store.perform(actions)
+                queued = s.pop("cron_queue", None) or []  # pauses and resumes asked for from Desktop
+                actions = core.tick(s, time.time(), lambda: store.runnable_jobs(s))
+                if not s["rest"]:
+                    store.runnable_jobs(s)  # keep the Desktop page's job list fresh
+            store.perform(queued + actions)
         except Exception as exc:
             log.warning("sabbath tick failed: %s", exc)
     lock_file.close()
@@ -87,20 +76,21 @@ def _ticker(stop: threading.Event) -> None:
 USAGE = "/sabbath [status | here | now [hours] | try | end | ox [why] | keep | stop | doctor]"
 
 
-def _session_chat() -> str:
-    """platform:chat of the messaging conversation running this command ('' elsewhere)."""
-    try:
-        from gateway.session_context import get_session_env
-        platform = get_session_env("HERMES_SESSION_PLATFORM", "").strip().lower()
-        chat = get_session_env("HERMES_SESSION_CHAT_ID", "").strip()
-        if platform and chat and platform not in ("cli", "tui", "desktop", "local", "api_server"):
-            return f"{platform}:{chat}"
-    except Exception:
-        pass
+def _source_chat(source) -> str:
+    """platform:chat from the ``source`` Hermes hands an authorized command (works in the plugin host too)."""
+    get = (lambda k: source.get(k)) if isinstance(source, dict) else (lambda k: getattr(source, k, None))
+    platform = get("platform")
+    platform = str(getattr(platform, "value", platform) or "").strip().lower()
+    chat = str(get("chat_id") or "").strip()
+    if platform and chat and platform not in ("cli", "tui", "desktop", "local", "api_server"):
+        return f"{platform}:{chat}"
     return ""
 
 
-def _current_chat() -> str:
+def _session_chat(source=None) -> str:
+    """platform:chat of the messaging conversation running this command ('' elsewhere)."""
+    if source is not None and _source_chat(source):
+        return _source_chat(source)
     try:
         from gateway.session_context import get_session_env
         platform = get_session_env("HERMES_SESSION_PLATFORM", "").strip().lower()
@@ -109,10 +99,6 @@ def _current_chat() -> str:
             return f"{platform}:{chat}"
     except Exception:
         pass
-    with store.locked_state() as s:
-        pend = s.pop("here_pending", None)
-    if pend and time.time() - pend["at"] < HERE_WINDOW:
-        return pend["chat"]
     return ""
 
 
@@ -138,14 +124,14 @@ def _status(s: dict) -> str:
     return "\n".join(lines)
 
 
-def run(raw: str) -> str:
+def run(raw: str, source=None, **_kw) -> str:
     parts = (raw or "").strip().split()
     verb = parts[0].lower() if parts else "status"
     rest = " ".join(parts[1:])
     with store.locked_state() as s:
         _sync(s)
     if verb == "here":
-        chat = _current_chat()
+        chat = _session_chat(source)
         if not chat:
             return "Send /sabbath here from the chat where you want Hermes to say goodnight (Telegram, Signal…)."
         with store.locked_state() as s:
@@ -160,11 +146,11 @@ def run(raw: str) -> str:
             return "Usage: /sabbath now [hours]"
         with store.locked_state() as s:
             hours = hours or s["hours"]
-        return store.begin_now(max(0.1, min(72.0, hours)) * 3600, here=_session_chat())
+        return store.begin_now(max(0.1, min(72.0, hours)) * 3600, here=_session_chat(source))
     if verb == "try":
-        return store.begin_now(core.TRY_SECONDS, kind="try", here=_session_chat())
+        return store.begin_now(core.TRY_SECONDS, kind="try", here=_session_chat(source))
     if verb == "end":
-        return store.end_now(here=_session_chat())
+        return store.end_now(here=_session_chat(source))
     if verb == "ox":
         with store.locked_state() as s:
             out = core.ox(s, time.time(), rest)
@@ -222,11 +208,11 @@ def _tool(name):
 def register(ctx):
     global _ctx
     _ctx = ctx
+    store.use(ctx)
     for name, spec in TOOLS.items():
         ctx.register_tool(name=name, toolset="sabbath", schema={"name": name, **spec},
                           handler=_tool(name), emoji="🕯")
     ctx.register_hook("pre_llm_call", _on_llm_call)
-    ctx.register_hook("pre_gateway_dispatch", _on_gateway_message)
     ctx.register_command("sabbath", run, description="A weekly day of rest, kept with Hermes",
                          args_hint="[status|here|now|try|end|ox|keep|stop]")
     stop = threading.Event()
